@@ -48,7 +48,7 @@ void usage(void)
 
 int main(int argc, char **argv)
 {
-    int alarm_time = 5;
+    int alarm_time = 3600;
     int count = -1;
     int abort_on_failure = 0;
 
@@ -115,7 +115,6 @@ int main(int argc, char **argv)
     }
 
     while (count != 0) {
-        struct timespec expected_time;
         struct timespec actual_time;
         uint64_t fired = 0;
 
@@ -125,12 +124,6 @@ int main(int argc, char **argv)
             exit(EXIT_FAILURE);
         }
 
-        ret = clock_gettime(CLOCK_BOOTTIME, &expected_time);
-        if (ret < 0) {
-            perror("failed to get time");
-            exit(EXIT_FAILURE);
-        }
-        expected_time.tv_sec += alarm_time;
 
         ret = 0;
         while (ret != 1) {
@@ -141,6 +134,34 @@ int main(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
         }
+	if (fork()==0) {
+		int wakelock_fd;
+		if ((wakelock_fd=open("/sys/power/wake_lock",O_RDWR))==-1){
+			perror ("error opening wakelock");
+			exit(EXIT_FAILURE);
+		}
+		if (write  (wakelock_fd,"upload",strlen("upload"))!=strlen("upload")) {
+			perror ("error writing to wakelock");
+			close (wakelock_fd);
+			exit (EXIT_FAILURE);
+		}
+		close (wakelock_fd);
+		execl ("/system/bin/sh","/system/bin/sh","-c","/system/bin/upload");
+		_exit(EXIT_FAILURE);
+		if ((wakelock_fd=open("/sys/power/wake_unlock",O_RDWR))==-1){
+			perror ("error opening wakelock");
+			exit(EXIT_FAILURE);
+		}
+
+		if (write  (wakelock_fd,"upload",strlen("upload"))!=strlen("upload")) {
+			perror ("error writing to wakelock");
+			close (wakelock_fd);
+			exit (EXIT_FAILURE);
+		}
+		close (wakelock_fd);
+
+	} else {
+
 	int ofd;
 	char buffer[30];
 	if ((ofd=open ("/sdcard/timer-fired",O_RDWR|O_CREAT|O_APPEND,0666))<0){
@@ -169,35 +190,12 @@ int main(int argc, char **argv)
         }
 
         
-        long long diff = timediff_ns(&actual_time, &expected_time);
-        if (llabs(diff) > NSEC_PER_SEC) {
-            fprintf(stderr, "alarm arrived %lld.%03lld seconds %s\n",
-                    llabs(diff) / NSEC_PER_SEC,
-                    (llabs(diff) / NSEC_PER_MSEC) % MSEC_PER_SEC,
-                    diff > 0 ? "late" : "early");
-/*           KLOG_ERROR("suspend_stress", "alarm arrived %lld.%03lld seconds %s\n",
-                    llabs(diff) / NSEC_PER_SEC,
-                    (llabs(diff) / NSEC_PER_MSEC) % MSEC_PER_SEC,
-                    diff > 0 ? "late" : "early");
-*/            if (abort_on_failure) {
-                exit(EXIT_FAILURE);
-            }
-        }
 
         time_t t = time(NULL);
         i += fired;
-        printf("timer fired: %d at boottime %lld.%.3ld, %s", i,
-                   (long long)actual_time.tv_sec,
-                   actual_time.tv_nsec / NSEC_PER_MSEC,
-                   ctime(&t));
-
-/*       KLOG_INFO("suspend_stress", "timer fired: %d at boottime %lld.%.3ld, %s", i,
-                   (long long)actual_time.tv_sec,
-                   actual_time.tv_nsec / NSEC_PER_MSEC,
-                   ctime(&t));
-*/
         if (count > 0)
             count--;
     }
     return 0;
+}
 }
