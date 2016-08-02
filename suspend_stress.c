@@ -36,57 +36,11 @@ long long timediff_ns(const struct timespec *a, const struct timespec *b) {
             (a->tv_nsec - b->tv_nsec);
 }
 
-void usage(void)
-{
-    printf("usage: suspend_stress [ <options> ]\n"
-           "options:\n"
-           "  -a,--abort                abort test on late alarm\n"
-           "  -c,--count=<count>        number of times to suspend (default infinite)\n"
-           "  -t,--time=<seconds>       time to suspend for (default 5)\n"
-        );
-}
 
 int main(int argc, char **argv)
 {
-    int alarm_time = 3600;
-    int count = -1;
+    int alarm_time = 1800;
     int abort_on_failure = 0;
-
-    while (1) {
-        const static struct option long_options[] = {
-            {"abort", no_argument, 0, 'a'},
-            {"count", required_argument, 0, 'c'},
-            {"time", required_argument, 0, 't'},
-        };
-        int c = getopt_long(argc, argv, "ac:t:", long_options, NULL);
-        if (c < 0) {
-            break;
-        }
-
-        switch (c) {
-        case 'a':
-            abort_on_failure = 1;
-            break;
-        case 'c':
-            count = strtoul(optarg, NULL, 0);
-            break;
-        case 't':
-            alarm_time = strtoul(optarg, NULL, 0);
-            break;
-        case '?':
-            usage();
-            exit(EXIT_FAILURE);
-        default:
-            abort();
-        }
-    }
-
-
-    if (optind < argc) {
-        fprintf(stderr, "Unexpected argument: %s\n", argv[optind]);
-        usage();
-        exit(EXIT_FAILURE);
-    }
 
     int fd = timerfd_create(CLOCK_BOOTTIME_ALARM, 0);
     if (fd < 0) {
@@ -94,10 +48,9 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    struct itimerspec delay;// = itimerspec();
+    struct itimerspec delay;
     bzero (&delay,sizeof(struct itimerspec));
     delay.it_value.tv_sec = alarm_time;
-    int i = 0;
 
     int epoll_fd = epoll_create(1);
     if (epoll_fd < 0) {
@@ -105,7 +58,7 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    struct epoll_event ev;// = epoll_event();
+    struct epoll_event ev;
     bzero (&ev,sizeof(struct epoll_event));
     ev.events = EPOLLIN | EPOLLWAKEUP;
     int ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev);
@@ -114,7 +67,7 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    while (count != 0) {
+    while (1) {
         struct timespec actual_time;
         uint64_t fired = 0;
 
@@ -134,49 +87,23 @@ int main(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
         }
-	if (fork()==0) {
-		int wakelock_fd;
-		if ((wakelock_fd=open("/sys/power/wake_lock",O_RDWR))==-1){
-			perror ("error opening wakelock");
-			exit(EXIT_FAILURE);
-		}
-		if (write  (wakelock_fd,"upload",strlen("upload"))!=strlen("upload")) {
-			perror ("error writing to wakelock");
-			close (wakelock_fd);
-			exit (EXIT_FAILURE);
-		}
-		close (wakelock_fd);
-		execl ("/system/bin/sh","/system/bin/sh","-c","/system/bin/upload");
-		_exit(EXIT_FAILURE);
-		if ((wakelock_fd=open("/sys/power/wake_unlock",O_RDWR))==-1){
-			perror ("error opening wakelock");
-			exit(EXIT_FAILURE);
-		}
 
-		if (write  (wakelock_fd,"upload",strlen("upload"))!=strlen("upload")) {
-			perror ("error writing to wakelock");
-			close (wakelock_fd);
-			exit (EXIT_FAILURE);
-		}
-		close (wakelock_fd);
-
-	} else {
-
-	int ofd;
-	char buffer[30];
-	if ((ofd=open ("/sdcard/timer-fired",O_RDWR|O_CREAT|O_APPEND,0666))<0){
-	fprintf (stderr,"Error opening log %s\n",strerror(errno));
-	exit(EXIT_FAILURE);
+#ifndef LINUX
+	int wakelock_fd;
+	if ((wakelock_fd=open("/sys/power/wake_lock",O_RDWR))==-1){
+		perror ("error opening wakelock");
+		exit(EXIT_FAILURE);
 	}
-	ret = clock_gettime(CLOCK_REALTIME, &actual_time);
-        if (ret < 0) {
-            perror("failed to get time");
-            exit(EXIT_FAILURE);
-        }
+	if (write  (wakelock_fd,"upload",strlen("upload"))!=strlen("upload")) {
+		perror ("error writing to wakelock");
+		close (wakelock_fd);
+		exit (EXIT_FAILURE);
+	}
+	close (wakelock_fd);
+#endif
 
-	sprintf(buffer,"%d.%d\n",actual_time.tv_sec,actual_time.tv_nsec);
-	write (ofd,buffer,strlen(buffer));
-	close (ofd);
+//read epoll to release
+
         ssize_t bytes = read(fd, &fired, sizeof(fired));
         if (bytes < 0) {
             perror("read from timer fd failed");
@@ -191,11 +118,63 @@ int main(int argc, char **argv)
 
         
 
-        time_t t = time(NULL);
-        i += fired;
-        if (count > 0)
-            count--;
+
+	ret=fork();
+	if (ret <0) {
+		perror ("Couldn't fork");
+		exit (EXIT_FAILURE);
+	}
+	if (ret==0) {
+#ifndef LINUX
+		execl ("/system/bin/sh","/system/bin/sh","-c", "/data/local/tmp/upload",NULL);
+#else
+		execl ("/bin/sh","/bin/sh","-c", "/home/ghost/upload",NULL);
+#endif
+		_exit(EXIT_FAILURE);
+		
+	} else {
+//	printf ("forked with pid %d\n",ret);
+	
+	
+	int i;
+
+	if (waitpid (ret,&i,0) != ret) {
+		perror ("error waiting for execl");
+		exit(EXIT_FAILURE);
+	}
+//	printf ("pid %d terminated\n",ret2);
+#ifndef LINUX
+
+	if ((wakelock_fd=open("/sys/power/wake_unlock",O_RDWR))==-1){
+		perror ("error opening wakelock");
+		exit(EXIT_FAILURE);
+	}
+	if (write  (wakelock_fd,"upload",strlen("upload"))!=strlen("upload")) {
+		perror ("error writing to wakelock");
+		close (wakelock_fd);		
+		exit (EXIT_FAILURE);
+	}
+	close (wakelock_fd);
+
+#endif
+/*	int ofd;
+	char buffer[30];
+	if ((ofd=open ("/sdcard/timer-fired",O_RDWR|O_CREAT|O_APPEND,0666))<0){
+	fprintf (stderr,"Error opening log %s\n",strerror(errno));
+	exit(EXIT_FAILURE);
+	}
+	ret = clock_gettime(CLOCK_REALTIME, &actual_time);
+        if (ret < 0) {
+            perror("failed to get time");
+            exit(EXIT_FAILURE);
+        }
+
+	sprintf(buffer,"%d.%d\n",actual_time.tv_sec,actual_time.tv_nsec);
+	write (ofd,buffer,strlen(buffer));
+	close (ofd);
+*/
     }
-    return 0;
+    
 }
+return 0;
 }
