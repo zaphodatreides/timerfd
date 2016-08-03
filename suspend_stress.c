@@ -15,6 +15,10 @@
  */
 
 #include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/uio.h> 
+#include <sys/wait.h>
 #include <getopt.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -25,6 +29,44 @@
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 #include <fcntl.h>
+
+#define ANDROID_LOG_INFO 4
+
+#ifndef LINUX
+int print_alog (char *message){
+	int fd;
+	unsigned char prio=ANDROID_LOG_INFO;
+	struct iovec vec[3];
+	unsigned char *tag="timerfd";
+
+	fd = open ("/dev/log/main", O_WRONLY);
+	if (fd < 0) {
+		return 1;
+	}
+	vec[0].iov_base=(unsigned char *)&prio;
+	vec[0].iov_len=1;
+	vec[1].iov_base=(void *)tag;
+	vec[1].iov_len=strlen(tag)+1;
+	vec[2].iov_base=(void *)message;
+	vec[2].iov_len=strlen(message)+1;
+	writev(fd,vec,3);
+	close(fd);
+}
+#else
+int print_alog (char *message){
+	int fd;
+
+	fd = open ("/dev/kmsg", O_WRONLY);
+	if (fd < 0) {
+		return 1;
+	}
+	write(fd,message,strlen(message));
+	write(fd,"\n",1);
+	close(fd);
+}
+
+#endif
+
 
 
 #define NSEC_PER_SEC (1000*1000*1000)
@@ -41,10 +83,22 @@ int main(int argc, char **argv)
 {
     int alarm_time = 1800;
     int abort_on_failure = 0;
+	int pid=fork();
+	if (pid<0){ exit(EXIT_FAILURE);}
+	if (pid>0){ exit(EXIT_SUCCESS);}
+	umask(0);
+	int sid=setsid();
+	if (sid<0) {exit(EXIT_FAILURE);}
+	if ((chdir("/")) <0) {exit(EXIT_FAILURE);}
+	close (STDIN_FILENO);
+	close (STDOUT_FILENO);
+	close (STDERR_FILENO);
+	print_alog ("timerfd daemonized");
+
 
     int fd = timerfd_create(CLOCK_BOOTTIME_ALARM, 0);
     if (fd < 0) {
-        perror("timerfd_create failed");
+        print_alog("timerfd_create failed");
         exit(EXIT_FAILURE);
     }
 
@@ -54,7 +108,7 @@ int main(int argc, char **argv)
 
     int epoll_fd = epoll_create(1);
     if (epoll_fd < 0) {
-        perror("epoll_create failed");
+        print_alog("epoll_create failed");
         exit(EXIT_FAILURE);
     }
 
@@ -63,7 +117,7 @@ int main(int argc, char **argv)
     ev.events = EPOLLIN | EPOLLWAKEUP;
     int ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev);
     if (ret < 0) {
-        perror("epoll_ctl failed");
+        print_alog("epoll_ctl failed");
         exit(EXIT_FAILURE);
     }
 
@@ -73,7 +127,7 @@ int main(int argc, char **argv)
 
         ret = timerfd_settime(fd, 0, &delay, NULL);
         if (ret < 0) {
-            perror("timerfd_settime failed");
+            print_alog("timerfd_settime failed");
             exit(EXIT_FAILURE);
         }
 
@@ -83,7 +137,7 @@ int main(int argc, char **argv)
             struct epoll_event out_ev;
             ret = epoll_wait(epoll_fd, &out_ev, 1, -1);
             if (ret < 0 && errno != EINTR) {
-                perror("epoll_wait failed");
+                print_alog("epoll_wait failed");
                 exit(EXIT_FAILURE);
             }
         }
@@ -91,11 +145,11 @@ int main(int argc, char **argv)
 #ifndef LINUX
 	int wakelock_fd;
 	if ((wakelock_fd=open("/sys/power/wake_lock",O_RDWR))==-1){
-		perror ("error opening wakelock");
+		print_alog ("error opening wakelock");
 		exit(EXIT_FAILURE);
 	}
 	if (write  (wakelock_fd,"upload",strlen("upload"))!=strlen("upload")) {
-		perror ("error writing to wakelock");
+		print_alog ("error writing to wakelock");
 		close (wakelock_fd);
 		exit (EXIT_FAILURE);
 	}
@@ -106,14 +160,14 @@ int main(int argc, char **argv)
 
         ssize_t bytes = read(fd, &fired, sizeof(fired));
         if (bytes < 0) {
-            perror("read from timer fd failed");
+            print_alog("read from timer fd failed");
             exit(EXIT_FAILURE);
         } else if (bytes < (ssize_t)sizeof(fired)) {
-            fprintf(stderr, "unexpected read from timer fd: %zd\n", bytes);
+            print_alog("unexpected read from timer fd");
         }
 
         if (fired != 1) {
-            fprintf(stderr, "unexpected timer fd fired count: %" PRIu64 "\n", fired);
+            print_alog("unexpected timer fd fired count");
         }
 
         
@@ -121,7 +175,7 @@ int main(int argc, char **argv)
 
 	ret=fork();
 	if (ret <0) {
-		perror ("Couldn't fork");
+		print_alog ("Couldn't fork");
 		exit (EXIT_FAILURE);
 	}
 	if (ret==0) {
@@ -133,24 +187,22 @@ int main(int argc, char **argv)
 		_exit(EXIT_FAILURE);
 		
 	} else {
-//	printf ("forked with pid %d\n",ret);
 	
 	
 	int i;
 
 	if (waitpid (ret,&i,0) != ret) {
-		perror ("error waiting for execl");
+		print_alog ("error waiting for execl");
 		exit(EXIT_FAILURE);
 	}
-//	printf ("pid %d terminated\n",ret2);
 #ifndef LINUX
 
 	if ((wakelock_fd=open("/sys/power/wake_unlock",O_RDWR))==-1){
-		perror ("error opening wakelock");
+		print_alog ("error opening wakelock");
 		exit(EXIT_FAILURE);
 	}
 	if (write  (wakelock_fd,"upload",strlen("upload"))!=strlen("upload")) {
-		perror ("error writing to wakelock");
+		print_alog ("error writing to wakelock");
 		close (wakelock_fd);		
 		exit (EXIT_FAILURE);
 	}
@@ -160,12 +212,12 @@ int main(int argc, char **argv)
 /*	int ofd;
 	char buffer[30];
 	if ((ofd=open ("/sdcard/timer-fired",O_RDWR|O_CREAT|O_APPEND,0666))<0){
-	fprintf (stderr,"Error opening log %s\n",strerror(errno));
+	print_alog ("Error opening log");
 	exit(EXIT_FAILURE);
 	}
 	ret = clock_gettime(CLOCK_REALTIME, &actual_time);
         if (ret < 0) {
-            perror("failed to get time");
+            print_alog("failed to get time");
             exit(EXIT_FAILURE);
         }
 
