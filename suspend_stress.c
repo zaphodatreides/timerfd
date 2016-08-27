@@ -53,6 +53,8 @@ int print_alog (char *message){
 	close(fd);
 }
 #else
+#define EPOLLWAKEUP (1 << 29)
+
 int print_alog (char *message){
 	int fd;
 
@@ -81,7 +83,7 @@ long long timediff_ns(const struct timespec *a, const struct timespec *b) {
 
 int main(int argc, char **argv)
 {
-    int alarm_time = 1800;
+    int alarm_time = 60; //every 60 sec
     int abort_on_failure = 0;
 	int pid=fork();
 	if (pid<0){ exit(EXIT_FAILURE);}
@@ -142,7 +144,6 @@ int main(int argc, char **argv)
             }
         }
 
-#ifndef LINUX
 	int wakelock_fd;
 	if ((wakelock_fd=open("/sys/power/wake_lock",O_RDWR))==-1){
 		print_alog ("error opening wakelock");
@@ -153,8 +154,9 @@ int main(int argc, char **argv)
 		close (wakelock_fd);
 		exit (EXIT_FAILURE);
 	}
+	print_alog ("written to /sys/power/wake_lock");
 	close (wakelock_fd);
-#endif
+
 
 //read epoll to release
 
@@ -182,7 +184,8 @@ int main(int argc, char **argv)
 #ifndef LINUX
 		execl ("/system/bin/sh","/system/bin/sh","-c", "/data/local/tmp/upload",NULL);
 #else
-		execl ("/bin/sh","/bin/sh","-c", "/home/ghost/upload",NULL);
+		//exit(EXIT_SUCCESS);
+		execl ("/bin/sh","/bin/sh", "/home/ghost/upload",NULL);
 #endif
 		_exit(EXIT_FAILURE);
 		
@@ -190,12 +193,8 @@ int main(int argc, char **argv)
 	
 	
 	int i;
+	//exit(EXIT_SUCCESS);
 
-	if (waitpid (ret,&i,0) != ret) {
-		print_alog ("error waiting for execl");
-		exit(EXIT_FAILURE);
-	}
-#ifndef LINUX
 
 	if ((wakelock_fd=open("/sys/power/wake_unlock",O_RDWR))==-1){
 		print_alog ("error opening wakelock");
@@ -208,7 +207,6 @@ int main(int argc, char **argv)
 	}
 	close (wakelock_fd);
 
-#endif
 /*	int ofd;
 	char buffer[30];
 	if ((ofd=open ("/sdcard/timer-fired",O_RDWR|O_CREAT|O_APPEND,0666))<0){
