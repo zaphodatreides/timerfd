@@ -53,7 +53,9 @@ int print_alog (char *message){
 	close(fd);
 }
 #else
+#ifndef EPOLLWAKEUP 
 #define EPOLLWAKEUP (1 << 29)
+#endif
 
 int print_alog (char *message){
 	int fd;
@@ -83,7 +85,7 @@ long long timediff_ns(const struct timespec *a, const struct timespec *b) {
 
 int main(int argc, char **argv)
 {
-    int alarm_time = 60; //every 60 sec
+    int alarm_time = 3600; //every 60 sec
     int abort_on_failure = 0;
 	int pid=fork();
 	if (pid<0){ exit(EXIT_FAILURE);}
@@ -182,10 +184,10 @@ int main(int argc, char **argv)
 	}
 	if (ret==0) {
 #ifndef LINUX
-		execl ("/system/bin/sh","/system/bin/sh","-c", "/data/local/tmp/upload",NULL);
+		execl ("/system/bin/sh","/system/bin/sh","-c", "/data/local/scripts/upload",NULL);
 #else
 		//exit(EXIT_SUCCESS);
-		execl ("/bin/sh","/bin/sh", "/home/ghost/upload",NULL);
+		execl ("/bin/sh","/bin/sh", "/root/upload",NULL);
 #endif
 		_exit(EXIT_FAILURE);
 		
