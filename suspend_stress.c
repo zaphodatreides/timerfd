@@ -184,7 +184,7 @@ int main(int argc, char **argv)
 	}
 	if (ret==0) {
 #ifndef LINUX
-		execl ("/system/bin/sh","/system/bin/sh","-c", "/data/local/scripts/upload",NULL);
+		execl ("/data/local/scripts/upload","/data/local/scripts/upload",NULL);
 #else
 		//exit(EXIT_SUCCESS);
 		execl ("/bin/sh","/bin/sh", "/root/upload",NULL);
@@ -195,6 +195,11 @@ int main(int argc, char **argv)
 	
 	
 	int i;
+	if (waitpid (ret,&i,0) != ret) {
+		print_alog("error waiting for child to exit");
+		exit(EXIT_FAILURE);
+		}
+
 	//exit(EXIT_SUCCESS);
 
 
